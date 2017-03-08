@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: ef2387b49af6b7548a4c647828feb363
+timeCreated: 1441648984
+licenseType: Free
+MonoImporter:
+  serializedVersion: 2
+  defaultReferences:
+  - KMeansCS: {fileID: 7200000, guid: c3a700b618d16284da714088d4427315, type: 3}
+  - ReadPixelCS: {fileID: 7200000, guid: aa47a24387dd248448b4d1386bf11412, type: 3}
+  - SphereBatchCS: {fileID: 7200000, guid: 13aeb1df2a3267f4fb07a87e9af054df, type: 3}
+  - OcclusionCullingCS: {instanceID: 0}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

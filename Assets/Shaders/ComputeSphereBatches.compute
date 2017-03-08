@@ -1,0 +1,198 @@
+﻿#include "Helper.cginc"
+
+#pragma kernel ComputeProteinSphereBatches
+#pragma kernel ComputeProteinOcclusionMask
+#pragma kernel ComputeLipidSphereBatches
+#pragma kernel ComputeLipidOcclusionMask
+#pragma kernel ComputeProteinSphereBatchesClipped
+
+#define MAX_SPHERE_COUNT_PER_BATCH 100
+
+uniform float _Scale;
+uniform int _EnableLod;
+uniform	int _NumLevels;
+uniform	int _NumInstances;
+uniform float4 _CameraForward;
+uniform float4 _CameraPosition;
+uniform float4 _FrustrumPlanes[6]; 
+
+uniform	StructuredBuffer<float> _ProteinRadii;
+uniform	StructuredBuffer<int> _ProteinAtomCount;
+uniform	StructuredBuffer<int> _ProteinAtomStart;
+uniform	StructuredBuffer<int> _ProteinClusterCount;
+uniform	StructuredBuffer<int> _ProteinClusterStart;
+	
+uniform StructuredBuffer<float4> _LodLevelsInfos;	
+uniform	StructuredBuffer<float4> _ProteinInstanceInfo;
+uniform	StructuredBuffer<float4> _ProteinInstancePositions;	
+
+uniform StructuredBuffer<int> _ProteinInstanceCullFlags;
+uniform StructuredBuffer<int> _ProteinInstanceOcclusionFlags;
+uniform StructuredBuffer<int> _ProteinInstanceVisibilityFlags;
+
+uniform AppendStructuredBuffer<int4> _ProteinSphereBatchInfos;
+
+//**** ComputeProteinSphereBatches ****//
+
+[numthreads(64,1,1)]
+void ComputeProteinSphereBatches (uint3 id : SV_DispatchThreadID)
+{
+	if(id.x >= (uint)_NumInstances) return;
+
+    float4 infos = _ProteinInstanceInfo[id.x];	
+	float radius = _ProteinRadii[infos.x] * _Scale;
+	float3 pos = _ProteinInstancePositions[id.x].xyz * _Scale;	
+	float4 sphere = float4(pos, radius);
+    	
+	//int occlusionFlag = _ProteinInstanceOcclusionFlags[id.x];
+	//if(occlusionFlag == 1) return;
+
+	int cullFlag = _ProteinInstanceCullFlags[id.x];
+	if(cullFlag == 1) return;
+
+	bool frustrumTest = SphereFrustrumTest(_FrustrumPlanes, sphere);	
+    if (frustrumTest) return;
+    //if (frustrumTest || cutAwayTest /*|| _ProteinVisibilityFlag[infos.x] == 0*/) return;
+
+    int lodLevel = 0;		
+	float cameraDistance = dot(sphere.xyz - _CameraPosition.xyz, _CameraForward.xyz);
+		
+	// Compute lod level from lod infos
+	for(int k = 0; k < _NumLevels; k++) { lodLevel = (cameraDistance < _LodLevelsInfos[k].x) ? lodLevel : k+1; }	
+
+	lodLevel = _EnableLod == 0 ? 0 : lodLevel;
+	int clusterLevel = max(lodLevel - 1, 0);	
+		
+	// Find the count / start index of the protein
+	int sphereCount = (lodLevel == 0) ? _ProteinAtomCount[infos.x] : _ProteinClusterCount[infos.x * _NumLevels + clusterLevel];
+	int sphereStart = (lodLevel == 0) ? _ProteinAtomStart[infos.x] : _ProteinClusterStart[infos.x * _NumLevels + clusterLevel];
+
+	// Find the number of batches for this protein
+	int numBatches = ceil((float)sphereCount / (float)MAX_SPHERE_COUNT_PER_BATCH);	
+	int sphereCountPerBatch = ceil(float(sphereCount) / float(numBatches));
+
+	int batchStart = 0;
+	int batchCount = sphereCountPerBatch;
+
+    for (int j = 0; j < numBatches; j++)
+	{
+		batchCount = min(batchStart + sphereCountPerBatch, sphereCount) - batchStart;			
+		_ProteinSphereBatchInfos.Append(int4(id.x, lodLevel, batchCount, sphereStart + batchStart));
+		batchStart += batchCount;
+	}		
+}
+
+//**** ComputeProteinOcclusionMask ****//
+
+uniform	StructuredBuffer<int> _IngredientMaskParams;
+uniform AppendStructuredBuffer<int4> _OccludeeSphereBatches;
+
+[numthreads(64,1,1)]
+void ComputeProteinOcclusionMask (uint3 id : SV_DispatchThreadID)
+{
+	if(id.x >= (uint)_NumInstances) return;
+		
+    float4 info = _ProteinInstanceInfo[id.x];	
+	int cullFlag = _ProteinInstanceCullFlags[id.x];
+
+	if(cullFlag != 1 && _IngredientMaskParams[info.x] == 1)
+	{
+		_OccludeeSphereBatches.Append(int4(id.x, 0, 0, 0));
+	}
+}
+
+//**** ComputeLipidSphereBatches ****//
+
+uniform StructuredBuffer<float4> _LipidInstanceInfo;	
+uniform StructuredBuffer<float4> _LipidInstancePositions;
+uniform StructuredBuffer<int> _LipidInstanceCullFlags;
+uniform StructuredBuffer<int> _LipidInstanceOcclusionFlags;
+
+uniform AppendStructuredBuffer<int4> _LipidSphereBatches;
+
+[numthreads(64,1,1)]
+void ComputeLipidSphereBatches (uint3 id : SV_DispatchThreadID)
+{	
+	if(id.x >= (uint)_NumInstances) return;
+
+	float4 info = _LipidInstanceInfo[id.x];	
+	float4 sphere = _LipidInstancePositions[id.x] * _Scale;	
+	
+	//int occlusionFlag = _LipidInstanceOcclusionFlags[id.x];
+	//if(occlusionFlag == 1) return;
+
+	int cullFlag = _LipidInstanceCullFlags[id.x];
+	bool frustrumTest = SphereFrustrumTest(_FrustrumPlanes, sphere);	
+
+	if(cullFlag != 1 && !frustrumTest)
+	{
+		_LipidSphereBatches.Append(int4(id.x, info.x, info.y, info.z));
+	}	
+}
+
+//**** ComputeLipidOcclusionMask ****//
+
+[numthreads(64,1,1)]
+void ComputeLipidOcclusionMask (uint3 id : SV_DispatchThreadID)
+{
+	if(id.x >= (uint)_NumInstances) return;
+		
+    float4 info = _LipidInstanceInfo[id.x];	
+	int cullFlag = _LipidInstanceCullFlags[id.x];
+
+	if(cullFlag != 1 && _IngredientMaskParams[info.x] == 1)
+	{
+		_OccludeeSphereBatches.Append(int4(id.x, 0, 0, 0));
+	}
+}
+
+
+/**************************************************/
+
+[numthreads(64,1,1)]
+void ComputeProteinSphereBatchesClipped (uint3 id : SV_DispatchThreadID)
+{
+	if(id.x >= (uint)_NumInstances) return;
+
+    float4 infos = _ProteinInstanceInfo[id.x];	
+	float radius = _ProteinRadii[infos.x] * _Scale;
+	float3 pos = _ProteinInstancePositions[id.x].xyz * _Scale;	
+	float4 sphere = float4(pos, radius);
+    	
+	//int occlusionFlag = _ProteinInstanceOcclusionFlags[id.x];
+	//if(occlusionFlag == 1) return;
+
+	int cullFlag = _ProteinInstanceCullFlags[id.x];
+	if(cullFlag == 0) return;
+
+	bool frustrumTest = SphereFrustrumTest(_FrustrumPlanes, sphere);	
+    if (frustrumTest) return;
+    //if (frustrumTest || cutAwayTest /*|| _ProteinVisibilityFlag[infos.x] == 0*/) return;
+
+    int lodLevel = 0;		
+	float cameraDistance = dot(sphere.xyz - _CameraPosition.xyz, _CameraForward.xyz);
+		
+	// Compute lod level from lod infos
+	for(int k = 0; k < _NumLevels; k++) { lodLevel = (cameraDistance < _LodLevelsInfos[k].x) ? lodLevel : k+1; }	
+
+	lodLevel = _EnableLod == 0 ? 0 : lodLevel;
+	int clusterLevel = max(lodLevel - 1, 0);	
+		
+	// Find the count / start index of the protein
+	int sphereCount = (lodLevel == 0) ? _ProteinAtomCount[infos.x] : _ProteinClusterCount[infos.x * _NumLevels + clusterLevel];
+	int sphereStart = (lodLevel == 0) ? _ProteinAtomStart[infos.x] : _ProteinClusterStart[infos.x * _NumLevels + clusterLevel];
+
+	// Find the number of batches for this protein
+	int numBatches = ceil((float)sphereCount / (float)MAX_SPHERE_COUNT_PER_BATCH);	
+	int sphereCountPerBatch = ceil(float(sphereCount) / float(numBatches));
+
+	int batchStart = 0;
+	int batchCount = sphereCountPerBatch;
+
+    for (int j = 0; j < numBatches; j++)
+	{
+		batchCount = min(batchStart + sphereCountPerBatch, sphereCount) - batchStart;			
+		_ProteinSphereBatchInfos.Append(int4(id.x, lodLevel, batchCount, sphereStart + batchStart));
+		batchStart += batchCount;
+	}		
+}

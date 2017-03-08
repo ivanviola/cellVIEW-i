@@ -1,0 +1,127 @@
+﻿#include "Helper.cginc" 
+
+#pragma kernel ComputeCoverage
+#pragma kernel CountProteinInstances
+#pragma kernel CountLipidInstances
+#pragma kernel ClearVisibilityFlags
+#pragma kernel ComputeFocusScore
+
+int _Width;
+int _Height;
+int _NumInstances;
+
+Texture2D<int> _InstanceIdBuffer;
+
+StructuredBuffer<float4> _IngredientsInfo;
+StructuredBuffer<float4> _LipidInstancesInfo;
+StructuredBuffer<float4> _ProteinInstancesInfo;
+
+RWStructuredBuffer<int4> _RWIngredientsDisplayInfo;
+RWStructuredBuffer<int4> _RWIngredientGroupsDisplayInfo;
+
+RWStructuredBuffer<int> _RWLipidInstancesVisibilityFlags;
+RWStructuredBuffer<int> _RWProteinInstancesVisibilityFlags;
+
+//**********************************//
+
+RWStructuredBuffer<int> _ClearBuffer;
+
+[numthreads(64,1,1)]
+void ClearVisibilityFlags (uint3 id : SV_DispatchThreadID)
+{
+	if(id.x >= _NumInstances) return;
+	_ClearBuffer[id.x] = 0;
+}
+
+[numthreads(8,8,1)]
+void ComputeCoverage (uint3 id : SV_DispatchThreadID)
+{
+	if(id.x >= _Width || id.y >= _Height) return;
+	int instanceId = _InstanceIdBuffer[id.xy];
+
+	if(instanceId < 0) return;
+
+	if (instanceId >= 100000)
+	{
+		int lipidInstanceId = instanceId - 100000;
+		float4 instanceInfo = _LipidInstancesInfo[lipidInstanceId];
+		float4 ingredientInfo = _IngredientsInfo[instanceInfo.x];
+
+		_RWLipidInstancesVisibilityFlags[lipidInstanceId] = 1;
+
+		InterlockedAdd(_RWIngredientsDisplayInfo[instanceInfo.x].z, 1);
+		InterlockedAdd(_RWIngredientGroupsDisplayInfo[ingredientInfo.x].z, 1);
+	}
+	else
+	{
+		int proteinInstanceId = instanceId;
+		float4 instanceInfo = _ProteinInstancesInfo[proteinInstanceId];
+		float4 ingredientInfo = _IngredientsInfo[instanceInfo.x];
+
+		_RWProteinInstancesVisibilityFlags[proteinInstanceId] = 1;
+		InterlockedAdd(_RWIngredientsDisplayInfo[instanceInfo.x].z, 1);
+		InterlockedAdd(_RWIngredientGroupsDisplayInfo[ingredientInfo.x].z, 1);
+	}		
+}
+
+[numthreads(64,1,1)]
+void CountProteinInstances (uint3 id : SV_DispatchThreadID)
+{
+	if(id.x >= _NumInstances) return;
+	
+	float4 instanceInfo = _ProteinInstancesInfo[id.x];
+	float4 ingredientInfo = _IngredientsInfo[instanceInfo.x];
+
+	// Fetch visibilty flag for the current instance
+	int visibilityFlag = _RWProteinInstancesVisibilityFlags[id.x];
+
+	// If the current instance is visible...
+	if(visibilityFlag == 1)
+	//if(true)
+	{
+		InterlockedAdd(_RWIngredientsDisplayInfo[instanceInfo.x].y, 1);
+		InterlockedAdd(_RWIngredientGroupsDisplayInfo[ingredientInfo.x].y, 1);
+	}
+}
+
+[numthreads(64,1,1)]
+void CountLipidInstances (uint3 id : SV_DispatchThreadID)
+{
+	if(id.x >= _NumInstances) return;
+	
+	float4 instanceInfo = _LipidInstancesInfo[id.x];
+	float4 ingredientInfo = _IngredientsInfo[instanceInfo.x];
+
+	// Fetch visibilty flag for the current instance
+	int visibilityFlag = _RWLipidInstancesVisibilityFlags[id.x];
+
+	// If the current instance is visible...
+	if(visibilityFlag == 1)
+	//if(true)
+	{
+		InterlockedAdd(_RWIngredientsDisplayInfo[instanceInfo.x].y, 1);
+		InterlockedAdd(_RWIngredientGroupsDisplayInfo[ingredientInfo.x].y, 1);
+	}
+}
+
+Texture2D<float> _DepthBuffer;
+RWStructuredBuffer<int> _RWProteinFocusScore;
+
+RWStructuredBuffer<int2> _ScoreMax;
+
+
+[numthreads(64,1,1)]
+void ComputeFocusScore (uint3 id : SV_DispatchThreadID)
+{
+	if(id.x >= _Width || id.y >= _Height) return;
+	int instanceId = _InstanceIdBuffer[id.xy];
+	float depth = _DepthBuffer[id.xy];
+
+
+
+	if(instanceId < 0) return;
+
+
+}
+
+

@@ -1,0 +1,100 @@
+﻿#pragma kernel FindCentroid
+#pragma kernel UpdateCentroid
+
+uniform int _NumPoints;
+uniform int _NumCentroids;
+uniform	StructuredBuffer<float4> _PointBuffer;
+
+/************************************************/
+
+uniform	StructuredBuffer<float4> _CentroidBuffer;
+uniform	RWStructuredBuffer<int> _MembershipBuffer;
+//uniform	RWStructuredBuffer<int> _MembershipChangedBuffer;
+
+//groupshared float3 sharedCentroid[1024];
+//groupshared int sharedMembershipChange[1];
+
+[numthreads(64,1,1)]
+void FindCentroid (uint3 id : SV_DispatchThreadID, uint3 groupThreadId : SV_GroupThreadID)
+{
+	if(id.x >= (uint)_NumPoints) return;
+	
+	//sharedCentroid[groupThreadId.x] = _CentroidBuffer[groupThreadId.x].xyz;
+	//GroupMemoryBarrierWithGroupSync();
+
+	float minDist = 999999;
+	int closestCentroid = -1;
+
+	float3 currentPoint = _PointBuffer[id.x].xyz;
+
+	for(int i = 0; i < _NumCentroids; i++)
+	{
+		//float dist = distance(currentPoint, sharedCentroid[i]);
+		float dist = distance(currentPoint, _CentroidBuffer[i].xyz);
+
+		if(dist < minDist)
+		{
+			minDist = dist;
+			closestCentroid = i;
+		}
+	}
+
+    _MembershipBuffer[id.x] = closestCentroid;
+}
+
+/************************************************/
+
+uniform	StructuredBuffer<int> _NewMembershipBuffer;
+uniform	RWStructuredBuffer<float4> _NewCentroidBuffer;
+
+//groupshared int sharedMembership[1024];
+
+[numthreads(64, 1, 1)]
+void UpdateCentroid (uint3 id : SV_DispatchThreadID, uint3 groupThreadId : SV_GroupThreadID)
+{
+	if(id.x >= (uint)_NumCentroids) return;
+
+	int memberCount = 0;	
+	float boundingRadius = 0;	
+	float3 newCentroid = float3(0,0,0);
+	float3 oldCentroid = _NewCentroidBuffer[id.x].xyz;
+		
+	for(int i = 0; i < _NumPoints; i ++)
+	{			
+		bool addCentroid = (_NewMembershipBuffer[i] == (int)id.x);
+		float3 incPoint = (addCentroid) ? _PointBuffer[i].xyz : float3(0,0,0);	
+
+		newCentroid += incPoint;	
+		memberCount += (addCentroid) ? 1 : 0;	
+		boundingRadius = (addCentroid) ? max(distance(oldCentroid, incPoint), boundingRadius) : boundingRadius;				
+	}	
+
+	newCentroid /= memberCount;
+	//_NewCentroidBuffer[id.x] = float4(newCentroid, memberCount);
+	//_NewCentroidBuffer[id.x] = float4(newCentroid, boundingRadius);
+	_NewCentroidBuffer[id.x] = float4(newCentroid, 1);
+
+	//int endLoop = ceil(_NumPoints / 1024.0f);
+
+	//for(int i = 0; i < endLoop; i++)
+	//{
+	//	int pointIndex = groupThreadId.x + 1024 * i;
+	//	//sharedMembership[groupThreadId.x] = (pointIndex <_NumPoints) ? _NewMembershipBuffer[pointIndex] : -1;
+		
+	//	//GroupMemoryBarrierWithGroupSync();
+
+	//	for(int j = 0; j < 1024; j ++)
+	//	{			
+	//		//bool addCentroid = (sharedMembership[j] == (int)id.x);
+	//		bool addCentroid = (_NewMembershipBuffer[pointIndex] == (int)id.x);
+			
+	//		memberCount += (addCentroid) ? 1 : 0;		
+	//		newCentroid += (addCentroid) ? _PointBuffer[pointIndex].xyz : float3(0,0,0);	
+	//	}	
+
+	//	//GroupMemoryBarrierWithGroupSync();
+	//}
+
+	
+	//_NewCentroidBuffer[id.x] = float4(newCentroid, 0);
+}

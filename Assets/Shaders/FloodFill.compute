@@ -1,0 +1,74 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+
+uniform float _WidthScale;
+uniform float _HeightScale;
+
+uniform int _StepSize;
+Texture2D<float4> _Mask;
+Texture2D<float4> _Ping;
+RWTexture2D<float4> _Pong;
+
+float scaleDistance(int2 a, int2 b, float widthScale, float heightScale)
+{
+	float dx = (b.x - a.x) * widthScale;
+	float dy = (b.y - a.y) * heightScale;
+	return sqrt(dx*dx + dy*dy);
+}
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{	
+	//_Pong[id.xy] = _Mask[id.xy];
+	
+	float value = _Mask[id.xy].x;
+	if(value == 0) return;
+
+	
+
+	float4 valuePing = _Ping[id.xy];	
+	float dist = valuePing.z;
+	uint2 coord;
+
+    for(int x = -1; x <= 1; x++)
+	{
+		for(int y = -1; y <= 1; y++)
+		{			
+			if(x == 0 && y == 0) continue;
+
+			int2 idd = id.xy + int2(x,y) * _StepSize;
+							
+			if(_Mask[idd].x == 0)
+			{
+				//float newDist = distance(idd, id.xy);	
+				float newDist = scaleDistance(idd, id.xy, _WidthScale, _HeightScale);	
+				if(newDist < dist || dist < 0)
+				{
+					coord = idd;
+					dist = newDist;
+				}
+			}
+			else 
+			{
+				float4 samplePing = _Ping[idd];
+				if(samplePing.z < 0) continue;
+				
+				//float newDist = distance(samplePing.xy, id.xy);	
+				float newDist = scaleDistance(samplePing.xy, id.xy, _WidthScale, _HeightScale);	
+				if(newDist < dist || dist < 0)
+				{
+					coord = samplePing.xy;
+					dist = newDist;
+				}
+			}				
+		}		
+	}
+
+	if(dist > 0)
+	{
+		_Pong[id.xy] = float4(coord.x, coord.y, dist, -1);
+	}
+}

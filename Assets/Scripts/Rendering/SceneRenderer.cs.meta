@@ -1,0 +1,19 @@
+fileFormatVersion: 2
+guid: 5d58a4ee59b5eb842b672b0814c3e274
+timeCreated: 1441883084
+licenseType: Free
+MonoImporter:
+  serializedVersion: 2
+  defaultReferences:
+  - _contourMaterial: {fileID: 2100000, guid: 10e52561c3498e646a5d09835419286d, type: 2}
+  - _compositeMaterial: {fileID: 2100000, guid: 44b28769475d4874fbbbdc3b8262ecfb,
+      type: 2}
+  - _renderProteinsMaterial: {fileID: 2100000, guid: f45849dc9ddfa7542ab9389cde2485cf,
+      type: 2}
+  - _renderCurveIngredientsMaterial: {fileID: 2100000, guid: 23df4116c203b40429a78c971338adc2,
+      type: 2}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

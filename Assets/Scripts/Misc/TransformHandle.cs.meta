@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: eca6338e39f2cea4c8a9083884aa3c53
+labels:
+- Gizmo
+- C#
+- Transform
+- Script
+timeCreated: 1441883084
+licenseType: Free
+MonoImporter:
+  serializedVersion: 2
+  defaultReferences:
+  - LineShader: {fileID: 4800000, guid: a6c41c00984cf784caa98520bc9442ca, type: 3}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

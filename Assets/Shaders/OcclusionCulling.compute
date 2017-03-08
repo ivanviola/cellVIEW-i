@@ -1,0 +1,127 @@
+﻿#pragma kernel CSFillHiZMapFirstLevel
+#pragma kernel CSFillHiZMapSubLevels
+#pragma kernel OcclusionCulling
+
+#include "Helper.cginc"
+
+uniform	float _Scale;
+uniform uint _ScreenWidth;
+uniform uint _ScreenHeight;
+uniform float4x4 _CameraViewMatrix;
+uniform float4x4 _CameraProjMatrix;
+
+Texture3D<float> _HiZMap;
+RWTexture3D<float> _RWHiZMap;
+
+//--------------------------------------------------------------------------------------
+
+Texture2D<float> _DepthBuffer;
+int _ClearDepth;
+
+[numthreads(8,8,1)]
+void CSFillHiZMapFirstLevel (uint3 id : SV_DispatchThreadID)
+{
+	_RWHiZMap[uint3(id.xy, 0)] = _DepthBuffer[id.xy];
+}
+
+//--------------------------------------------------------------------------------------
+
+int _CurrentLevel;
+
+[numthreads(8,8,1)]
+void CSFillHiZMapSubLevels (uint3 id : SV_DispatchThreadID)
+{
+	if(id.x >= _ScreenWidth || id.y >= _ScreenHeight) return;
+
+	int previousLevel = _CurrentLevel - 1;
+	int stepSize = pow(2, previousLevel);
+
+    float za = _RWHiZMap[uint3(id.xy, previousLevel)];
+    float zb = _RWHiZMap[uint3(id.xy + uint2(stepSize, 0), previousLevel)];
+    float zc = _RWHiZMap[uint3(id.xy + uint2(0, stepSize), previousLevel)];
+    float zd = _RWHiZMap[uint3(id.xy + uint2(stepSize, stepSize), previousLevel)] ;
+	
+	_RWHiZMap[uint3(id.xy, _CurrentLevel)] = max ( max ( za , zb ), max ( zc , zd ));
+}
+
+//--------------------------------------------------------------------------------------
+
+uniform int _NumInstances;
+uniform int _CullingFilter;
+uniform	StructuredBuffer<float> _ProteinRadii;
+uniform	StructuredBuffer<float4> _ProteinInstanceInfos;
+uniform	RWStructuredBuffer<int> _ProteinInstanceCullFlags;
+uniform	StructuredBuffer<float4> _ProteinInstancePositions;
+
+float GetSampledDepth(int2 coord, int level, int offset)
+{
+	float sampledDepth = _HiZMap[uint3(coord.x, coord.y, level)];	
+	sampledDepth = max(sampledDepth, _HiZMap[uint3(coord.x + offset, coord.y, level)]);	
+	sampledDepth = max(sampledDepth, _HiZMap[uint3(coord.x, coord.y + offset, level)]);	
+	sampledDepth = max(sampledDepth, _HiZMap[uint3(coord.x + offset, coord.y + offset, level)]);	
+
+	return sampledDepth;
+}
+
+float2 GetSphereCorner(float4 center, float4 corner, int2 offset)
+{
+	float4 sphereCorner = center + float4(corner.x * offset.x, corner.y * offset.y, 0, 0);
+	sphereCorner.xy /= sphereCorner.w;
+	sphereCorner.xy = sphereCorner.xy * 0.5 + 0.5;
+	sphereCorner.xy *= float2(_ScreenWidth, _ScreenHeight);
+
+	return sphereCorner.xy;
+}	
+
+[numthreads(1,1,1)]
+void OcclusionCulling (uint3 id : SV_DispatchThreadID)
+{	
+	if(id.x >= (uint)_NumInstances) return;
+		
+	int cullFlag = _ProteinInstanceCullFlags[id.x];	
+
+	float4 infos = _ProteinInstanceInfos[id.x];				
+	float radius = _ProteinRadii[infos.x] * _Scale;
+	float3 pos = _ProteinInstancePositions[id.x].xyz * _Scale;	
+	float4 sphere = float4(pos, radius);
+			
+	// Compute the depth of the bounding sphere
+	float3 centerViewSpace = mul( _CameraViewMatrix, float4(sphere.xyz, 1 ) ).xyz;	
+	float4 centerScreenSpace = mul(_CameraProjMatrix, float4(centerViewSpace, 1) );
+	float4 cornerScreenSpace = mul(_CameraProjMatrix, float4(sphere.w, sphere.w, 0, 0) );
+
+	float3 sphereDepthViewSpace  = centerViewSpace - normalize( centerViewSpace ) * sphere.w;
+	float4 sphereDepthScreenSpace = mul( _CameraProjMatrix, float4( sphereDepthViewSpace, 1 ) );			
+	float sphereDepth = sphereDepthScreenSpace.z / sphereDepthScreenSpace.w; 
+
+	float2 lowerCorner = GetSphereCorner(centerScreenSpace, cornerScreenSpace, int2(-1,-1)); 
+	float2 upperCorner = GetSphereCorner(centerScreenSpace, cornerScreenSpace, int2(1,1)); 
+	
+	int pixelWidth = abs(upperCorner.x - lowerCorner.x);	
+	int hizMapLevel = floor(log2 (pixelWidth) );	
+	int sampleOffset = pixelWidth - pow(2, hizMapLevel);
+	
+	float sampledDepth = _HiZMap[uint3(lowerCorner.x, lowerCorner.y, hizMapLevel )];	
+	sampledDepth = max(sampledDepth, _HiZMap[uint3(lowerCorner.x + sampleOffset, lowerCorner.y, hizMapLevel )]);
+	sampledDepth = max(sampledDepth, _HiZMap[uint3(lowerCorner.x, lowerCorner.y + sampleOffset, hizMapLevel )]);
+	sampledDepth = max(sampledDepth, _HiZMap[uint3(lowerCorner.x + sampleOffset, lowerCorner.y + sampleOffset, hizMapLevel )]);
+
+	//int spherePixelWidth = upperCorner.x - lowerCorner.x;	
+	//int hizMapLevel = floor(log2 (spherePixelWidth) );	
+	//int sampleOffset = spherePixelWidth - pow(2, hizMapLevel);
+	//float sampledDepth = GetSampledDepth(lowerCorner.xy, hizMapLevel, sampleOffset);
+	
+	//int hizMapLevel = ceil(log2 (spherePixelWidth) );	
+	//float sampledDepth = _HiZMap[uint3(lowerCorner.xy, hizMapLevel)];	
+	
+	if(sphereDepth > sampledDepth && abs(sphereDepthViewSpace.z) > 10)
+	{
+		_ProteinInstanceCullFlags[id.x] = 0;
+	}
+	else if(cullFlag == 0)
+	{
+		_ProteinInstanceCullFlags[id.x] = _CullingFilter;
+	}
+
+    //_ProteinInstanceCullFlags[id.x] = 666;
+}

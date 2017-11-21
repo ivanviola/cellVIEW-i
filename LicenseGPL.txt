@@ -1,4 +1,4 @@
- If interested in obtaining a commercial license, contact Mathieu Le Muzic mathieu@cg.tuwien.ac.at.
+ If interested in obtaining a commercial license, contact Ivan Viola viola@cg.tuwien.ac.at.
                      GNU GENERAL PUBLIC LICENSE
                        Version 3, 29 June 2007
 
